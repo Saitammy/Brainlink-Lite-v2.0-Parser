@@ -179,6 +179,7 @@ class BrainLinkLiteApp(tk.Tk):
         self.create_widgets()
         self.recording = False
         self.connected_port = None
+        self.update_job = None
 
     def create_widgets(self):
         frm = ttk.Frame(self, padding=8); frm.pack(fill=tk.BOTH, expand=True)
@@ -270,6 +271,9 @@ class BrainLinkLiteApp(tk.Tk):
         global recording_stop_event
         if not self.recording:
             return
+        if self.update_job:
+            self.after_cancel(self.update_job)
+            self.update_job = None
         if recording_stop_event:
             recording_stop_event.set()
         time.sleep(0.1)
@@ -288,8 +292,7 @@ class BrainLinkLiteApp(tk.Tk):
 
     def _schedule_update(self):
         self._update_display()
-        global update_job
-        update_job = self.after(1000, self._schedule_update)
+        self.update_job = self.after(1000, self._schedule_update)
 
     def _update_display(self):
         self.value_vars["attention"].set(f"{safe_mean(eeg_data['attention']):.2f}")
