@@ -1,30 +1,20 @@
-# brainlink_lite_gui_com34.py
-# GUI recorder for BrainLink Lite v2.0
-# Uses COM4 -> COM3 fallback (only). Requires CushySerial + BrainLinkParser .pyd available.
-
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import threading, time, csv, collections
 from cushy_serial import CushySerial
-from BrainLinkParser import BrainLinkParser   # ensure BrainLinkParser.pyd is importable
+from BrainLinkParser import BrainLinkParser 
 
-# plotting libs
+
 import matplotlib
 matplotlib.use("TkAgg")
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# ---------------------
-# Config
-# ---------------------
-PLOT_LEN = 200            # number of points to show on live plot
-PLOT_UPDATE_MS = 250      # plot refresh rate (ms)
+PLOT_LEN = 200            
+PLOT_UPDATE_MS = 250      
 SERIAL_BAUD = 115200
-TARGET_PORTS = ["COM4", "COM3"]  # try COM4, then COM3
+TARGET_PORTS = ["COM4", "COM3"]  
 
-# ---------------------
-# Shared data stores
-# ---------------------
 eeg_data = {
     "attention": [], "meditation": [],
     "delta": [], "theta": [],
@@ -44,9 +34,7 @@ recording_stop_event = None
 record_start_time = None
 update_job = None
 
-# ---------------------
-# Utility helpers
-# ---------------------
+
 def safe_mean(lst):
     return sum(lst)/len(lst) if lst else 0.0
 
@@ -64,9 +52,6 @@ def compute_ratio_from_sample(sample):
     denom = (lb + hb) if (lb + hb) != 0 else 1e-9
     return (la + ha) / denom
 
-# ---------------------
-# Parser callbacks
-# ---------------------
 def onRaw(raw):
     return
 
@@ -83,7 +68,7 @@ def onEEG_cb(data):
         eeg_data["lowGamma"].append(getattr(data, "lowGamma", 0))
         eeg_data["highGamma"].append(getattr(data, "highGamma", 0))
 
-        # push ratio + attention to plot buffers (timestamp relative to start)
+    
         ratio = compute_ratio_from_sample({
             "lowAlpha": getattr(data, "lowAlpha",0),
             "highAlpha": getattr(data, "highAlpha",0),
@@ -101,24 +86,14 @@ def onExtendEEG(data): return
 def onGyro(x,y,z): return
 def onRR(r1,r2,r3): return
 
-# ---------------------
-# Serial & parser management (COM4 -> COM3 only)
-# ---------------------
 def ensure_parser():
     global parser
     if parser is None:
         parser = BrainLinkParser(onEEG_cb, onExtendEEG, onGyro, onRR, onRaw)
 
 def try_connect_fixed_ports():
-    """
-    Try COM4 then COM3 (in that order).
-    Returns the connected port string on success.
-    Raises Exception if both fail.
-    """
     global serial_conn
     ensure_parser()
-
-    # ensure any previous connection closed
     try:
         if serial_conn:
             serial_conn.close()
@@ -145,7 +120,6 @@ def try_connect_fixed_ports():
             # try next port
             serial_conn = None
             continue
-    # if reached here, both failed
     raise RuntimeError(f"Failed to open any target COM port. Last error: {last_exc}")
 
 def disconnect_serial():
@@ -158,9 +132,6 @@ def disconnect_serial():
     finally:
         serial_conn = None
 
-# ---------------------
-# Recording loop
-# ---------------------
 def recording_loop(stop_event):
     # this loop just keeps the record_start_time running; parser callbacks collect data
     global record_start_time
@@ -168,9 +139,6 @@ def recording_loop(stop_event):
     while not stop_event.is_set():
         time.sleep(0.2)
 
-# ---------------------
-# Tkinter GUI
-# ---------------------
 class BrainLinkLiteApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -280,7 +248,6 @@ class BrainLinkLiteApp(tk.Tk):
         self.recording = False
         self.btn_start.config(state=tk.NORMAL); self.btn_stop.config(state=tk.DISABLED)
         self.btn_save.config(state=tk.NORMAL)
-        # compute final averages and log
         ratio = compute_alpha_beta_ratio_from_means()
         self.text.insert(tk.END, f"Final α/β Ratio: {ratio:.3f}\n")
         # disconnect serial (clean up)
@@ -338,16 +305,37 @@ class BrainLinkLiteApp(tk.Tk):
         if not fname:
             return
         maxlen = max(len(v) for v in eeg_data.values())
+        header = [
+            "index","attention","meditation","delta","theta","lowAlpha","highAlpha","lowBeta","highBeta","lowGamma","highGamma",
+            "Alpha/Beta_Ratio", "Theta/Beta_Ratio"  # Do not prefer Theta/Beta_Ratio, I will have to remove it later.
+        ]
+        band_keys = [
+            "attention","meditation","delta","theta","lowAlpha","highAlpha",
+            "lowBeta","highBeta","lowGamma","highGamma"
+        ]
+        
         with open(fname, "w", newline="") as f:
             writer = csv.writer(f)
-            header = ["index","attention","meditation","delta","theta","lowAlpha","highAlpha","lowBeta","highBeta","lowGamma","highGamma"]
             writer.writerow(header)
+            def safe_divide(numerator, denominator):
+                return numerator / denominator if denominator != 0 else 0.0
+
             for i in range(maxlen):
                 row = [i]
-                for k in ["attention","meditation","delta","theta","lowAlpha","highAlpha","lowBeta","highBeta","lowGamma","highGamma"]:
+                sample_data = {} 
+                for k in band_keys:
                     val = eeg_data[k][i] if i < len(eeg_data[k]) else ""
                     row.append(val)
-                writer.writerow(row)
+                    if isinstance(val, (int, float)):
+                        sample_data[k] = val
+                alpha_power = sample_data.get("lowAlpha", 0) + sample_data.get("highAlpha", 0)
+                theta_power = sample_data.get("theta", 0)
+                beta_power = sample_data.get("lowBeta", 0) + sample_data.get("highBeta", 0)
+                alpha_beta_ratio = safe_divide(alpha_power, beta_power)
+                theta_beta_ratio = safe_divide(theta_power, beta_power)
+                row.append(f"{alpha_beta_ratio:.3f}")
+                row.append(f"{theta_beta_ratio:.3f}")
+                writer.writerow(row)    
         messagebox.showinfo("Saved", f"Saved session to {fname}")
 
     def on_quit(self):
@@ -361,9 +349,6 @@ class BrainLinkLiteApp(tk.Tk):
             pass
         self.destroy()
 
-# ---------------------
-# Run
-# ---------------------
 if __name__ == "__main__":
     app = BrainLinkLiteApp()
     app.mainloop()
