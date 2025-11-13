@@ -1,2 +1,2 @@
 # Brainlink-Lite-v2.0-Parser
-This Python script aims to retrieve Absolute Power Band values.
+This Python script aims to retrieve Absolute Power Band values from the BrainLink v2.0 device.
